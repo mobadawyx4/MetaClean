@@ -1,0 +1,12 @@
+# MetaClean Dependencies
+# Core image processing & validation
+pillow>=10.0.0
+
+# Automated testing suite
+pytest>=7.0.0
+
+# Note: ExifTool is an external system package.
+# On Linux Mint / Ubuntu / Debian:
+#   sudo apt install libimage-exiftool-perl
+# On Windows:
+#   winget install OliverBetz.ExifTool

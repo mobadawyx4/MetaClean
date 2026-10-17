@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Output directories & artifacts
+*.bak
+*_clean.*
+*_cleaned.*
+*report.json
+*summary.csv
+cleaned_images/
+temp/
+scratch/
+.DS_Store
+Thumbs.db
