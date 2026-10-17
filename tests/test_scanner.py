@@ -115,3 +115,24 @@ def test_privacy_analyzer_direct_rules() -> None:
     # Informational
     item_dim = analyzer.evaluate_tag("ImageWidth", 1920, group="File")
     assert item_dim.risk_level == RiskLevel.INFORMATIONAL
+def test_icc_profile_tags_are_informational():
+    """ICC color-profile tags must not be misclassified as personal metadata."""
+    from modules.metadata_scanner import MetadataScanner
+
+    scanner = MetadataScanner()
+
+    assert scanner._classify_tag("ICC_Profile", "ProfileDateTime")[0] == "informational"
+    assert scanner._classify_tag("ICC_Profile", "DeviceModel")[0] == "informational"
+    assert scanner._classify_tag("ICC_Profile", "ProfileCreator")[0] == "informational"
+    assert scanner._classify_tag("ICC_Profile", "ProfileCopyright")[0] == "informational"
+    assert scanner._classify_tag("ICC_Profile", "ProfileDescription")[0] == "informational"
+
+
+def test_real_gps_and_author_tags_are_still_detected():
+    """Actual GPS and author tags must retain their sensitive classifications."""
+    from modules.metadata_scanner import MetadataScanner
+
+    scanner = MetadataScanner()
+
+    assert scanner._classify_tag("GPS", "GPSLatitude")[0] == "gps"
+    assert scanner._classify_tag("IFD0", "Artist")[0] == "author"

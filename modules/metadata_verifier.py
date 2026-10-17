@@ -194,7 +194,10 @@ class MetadataVerifier:
             )
         else:
             status = VerificationStatus.PASS
-            summary = "Verification PASS: All defined verification checks passed. No targeted metadata detected."
+            summary = (
+    "Verification PASS: All targeted metadata categories passed verification. "
+    "This does not guarantee that every metadata field has been removed."
+)
 
         return VerificationReport(
             target_image=resolved_target,

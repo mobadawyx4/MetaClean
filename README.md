@@ -97,7 +97,7 @@ cd ~/MetaClean-
 #### Step 3 — Install MetaClean
 
 ```bash
-chmod +x install.sh run.sh
+chmod +x install.sh
 ./install.sh
 ```
 
@@ -106,7 +106,7 @@ The installer creates a virtual environment and installs the Python dependencies
 #### Step 4 — Start MetaClean
 
 ```bash
-./run.sh
+./venv/bin/python main.py
 ```
 
 ### Option B: Manual installation
@@ -125,7 +125,7 @@ python3 -m venv venv
 Then start the application:
 
 ```bash
-./run.sh
+./venv/bin/python main.py
 ```
 
 ### Verify ExifTool

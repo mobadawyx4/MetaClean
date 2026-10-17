@@ -89,3 +89,13 @@ def test_verify_incomplete_when_backend_limited(clean_jpeg: Path) -> None:
     # When ExifTool is unavailable, verification must report INCOMPLETE
     assert rep.status == VerificationStatus.INCOMPLETE
     assert any("incomplete" in lim.lower() or "pillow" in lim.lower() for lim in rep.limitations)
+def test_pass_summary_does_not_claim_all_metadata_was_removed(
+    clean_jpeg: Path,
+) -> None:
+    """PASS confirms targeted checks, not complete metadata removal."""
+    verifier = MetadataVerifier()
+    rep = verifier.verify(clean_jpeg, targeted_categories=["all"])
+
+    assert rep.status == VerificationStatus.PASS
+    assert "targeted metadata categories" in rep.summary_message.lower()
+    assert "does not guarantee" in rep.summary_message.lower()

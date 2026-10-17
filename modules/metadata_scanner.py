@@ -122,6 +122,10 @@ class MetadataScanner:
         """Determines the semantic category of a tag and whether it is a filesystem property."""
         group_upper = group.upper()
         tag_lower = tag_name.lower()
+        # ICC profiles contain color-management data, not personal metadata.
+        if "ICC" in group_upper:
+            return "informational", False
+
 
         # Filesystem attributes
         if group_upper == "SYSTEM":
