@@ -140,32 +140,22 @@ To check whether MetaClean detects ExifTool:
 ./venv/bin/python -c "import config; print('ExifTool Available:', config.EXIFTOOL_AVAILABLE, config.EXIFTOOL_PATH)"
 ```
 
+
+
 ### Windows (PowerShell)
 
-**Requirements:** Python 3 and Windows PowerShell. Install Python from https://www.python.org/downloads/windows/ and enable Python on PATH.
+**Requirements:** Windows 10/11 and Python 3. Install Python from https://www.python.org/downloads/windows/ and enable Add Python to PATH.
 
-1. Install ExifTool using WinGet:
+Download the project with `git clone https://github.com/mobadawyx4/MetaClean.git` or download its ZIP from GitHub and extract it. Open PowerShell in the project folder, then run:
 
-   ```powershell
-   winget install --id OliverBetz.ExifTool --exact
-   ```
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\install.ps1
+.\run.ps1 --help
+.\run.ps1 scan .\photo.jpg
+```
 
-2. Open PowerShell in the MetaClean project folder.
-
-3. Install dependencies:
-
-   ```powershell
-   .\install.ps1
-   ```
-
-4. Run MetaClean:
-
-   ```powershell
-   .\run.ps1 --help
-   .\run.ps1 scan photo.jpg
-   ```
-
-Replace `photo.jpg` with your image path. If ExifTool was just installed, reopen PowerShell.
+Replace `photo.jpg` with your image path.
 
 ## 5. Quick Start
 
