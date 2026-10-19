@@ -169,61 +169,68 @@ Replace `photo.jpg` with your image path. If ExifTool was just installed, reopen
 
 ## 5. Quick Start
 
-Start the interactive menu:
+MetaClean is a command-line application. Run a subcommand directly; there is no interactive menu.
 
-```bash
-./run.sh
+### Windows PowerShell
+
+Run these commands from the project folder:
+
+```powershell
+.\install.ps1
+.\run.ps1 --help
+.\run.ps1 scan .\photo.jpg
+.\run.ps1 clean .\photo.jpg --output .\cleaned_photo.jpg --yes
+.\run.ps1 verify .\cleaned_photo.jpg
 ```
 
-Scan an image:
+### Linux Mint
+
+Run these commands from the project folder:
 
 ```bash
+chmod +x install.sh run.sh
+./install.sh
+./run.sh --help
 ./run.sh scan photo.jpg
-```
-
-Clean an image and save the result to a new file:
-
-```bash
 ./run.sh clean photo.jpg --output cleaned_photo.jpg --yes
-```
-
-Verify the cleaned image:
-
-```bash
 ./run.sh verify cleaned_photo.jpg
 ```
 
-Replace `photo.jpg` with the path to your own image. If a command or option is not available in your installed version, check the command help:
-
-```bash
-./run.sh --help
-```
+Replace `photo.jpg` with the path to your image. Keep a backup of important originals.
 
 ## 6. Usage Examples
 
-The examples below assume that you are running commands from the project directory and that the input image is named `photo.jpg`.
+The examples below assume that the input image is named `photo.jpg` and that commands are run from the project folder.
 
 ### Scan an image
 
+Windows PowerShell:
+
+```powershell
+.\run.ps1 scan .\photo.jpg
+.\run.ps1 scan .\photo.jpg --detailed
+.\run.ps1 scan .\photo.jpg --json
+```
+
+Linux Mint:
+
 ```bash
 ./run.sh scan photo.jpg
-```
-
-Show detailed metadata:
-
-```bash
 ./run.sh scan photo.jpg --detailed
-```
-
-Export scan output as JSON, if supported by the command:
-
-```bash
 ./run.sh scan photo.jpg --json
 ```
 
-### Remove supported metadata
+### Remove metadata
 
-Save a cleaned copy without overwriting the original:
+Save a cleaned copy without overwriting the original.
+
+Windows PowerShell:
+
+```powershell
+.\run.ps1 clean .\photo.jpg --output .\cleaned_photo.jpg --yes
+```
+
+Linux Mint:
 
 ```bash
 ./run.sh clean photo.jpg --output cleaned_photo.jpg --yes
@@ -231,11 +238,29 @@ Save a cleaned copy without overwriting the original:
 
 ### Verify an image
 
-```bash
-./run.sh verify cleaned_photo.jpg
+Windows PowerShell:
+
+```powershell
+.\run.ps1 verify .\cleaned_photo.jpg
+.\run.ps1 verify .\cleaned_photo.jpg --json
 ```
 
-### Generate a report
+Linux Mint:
+
+```bash
+./run.sh verify cleaned_photo.jpg
+./run.sh verify cleaned_photo.jpg --json
+```
+
+### Generate an audit report
+
+Windows PowerShell:
+
+```powershell
+.\run.ps1 report .\photo.jpg --output .\audit_report.json --cleaned .\cleaned_photo.jpg
+```
+
+Linux Mint:
 
 ```bash
 ./run.sh report photo.jpg --output audit_report.json --cleaned cleaned_photo.jpg
@@ -243,27 +268,43 @@ Save a cleaned copy without overwriting the original:
 
 ### Process a directory
 
-```bash
-./run.sh batch ./raw_photos --output-dir ./sanitized_photos --yes
+Create the input directory and put images in it before running these examples.
+
+Windows PowerShell:
+
+```powershell
+.\run.ps1 batch .\raw_photos --output-dir .\sanitized_photos --yes
+.\run.ps1 batch .\raw_photos --output-dir .\sanitized_photos --recursive --report .\audit.csv --yes
+.\run.ps1 batch .\raw_photos --output-dir .\sanitized_photos --format json --report .\audit.json --yes
 ```
 
-For all available commands and options, use the application's help output and interactive menu.
+Linux Mint:
+
+```bash
+./run.sh batch ./raw_photos --output-dir ./sanitized_photos --yes
+./run.sh batch ./raw_photos --output-dir ./sanitized_photos --recursive --report ./audit.csv --yes
+./run.sh batch ./raw_photos --output-dir ./sanitized_photos --format json --report ./audit.json --yes
+```
+
+For all supported commands and options, run `.\run.ps1 COMMAND --help` on Windows or `./run.sh COMMAND --help` on Linux.
 
 ## 7. Selective Metadata Removal
 
-MetaClean supports category-based removal through the `--remove` option where available. For example:
+Use `--remove` to choose which metadata categories to remove. Supported categories are `gps`, `date`, `device`, `author`, `copyright`, `comments`, `exif`, `iptc`, `xmp`, and `all`.
 
-```bash
-./run.sh clean photo.jpg --output cleaned_photo.jpg --remove gps,date --yes
+Windows PowerShell:
+
+```powershell
+.\run.ps1 clean .\photo.jpg --output .\no_gps.jpg --remove gps --yes
+.\run.ps1 clean .\photo.jpg --output .\no_device_author.jpg --remove device,author --yes
 ```
 
-Remove device and author information:
+Linux Mint:
 
 ```bash
-./run.sh clean photo.jpg --output cleaned_photo.jpg --remove device,author --yes
+./run.sh clean photo.jpg --output no_gps.jpg --remove gps --yes
+./run.sh clean photo.jpg --output no_device_author.jpg --remove device,author --yes
 ```
-
-Common category names used by the project include:
 
 | Category | Examples |
 | --- | --- |
@@ -278,7 +319,7 @@ Common category names used by the project include:
 | `xmp` | XMP metadata |
 | `all` | All supported removable metadata |
 
-**Note:** Selective cleaning intentionally retains categories that were not selected. Review the verification result before sharing the output.
+Selective cleaning retains categories that were not selected. Review the verification result before sharing the output.
 
 ## 8. Verification Results
 
@@ -293,25 +334,25 @@ A `PASS` result applies to the checks performed by MetaClean; it is not a guaran
 
 ## 9. Batch Processing
 
-Process images in a directory:
+Batch processing requires an input directory and `--output-dir`. Use `--recursive` to include subdirectories, and `--report` to save a CSV or JSON summary.
+
+Windows PowerShell:
+
+```powershell
+.\run.ps1 batch .\raw_photos --output-dir .\sanitized_photos --yes
+.\run.ps1 batch .\raw_photos --output-dir .\sanitized_photos --recursive --report .\audit.csv --yes
+.\run.ps1 batch .\raw_photos --output-dir .\sanitized_photos --format json --report .\audit.json --yes
+```
+
+Linux Mint:
 
 ```bash
 ./run.sh batch ./raw_photos --output-dir ./sanitized_photos --yes
-```
-
-Process subdirectories recursively and write a CSV report:
-
-```bash
 ./run.sh batch ./raw_photos --output-dir ./sanitized_photos --recursive --report ./audit.csv --yes
+./run.sh batch ./raw_photos --output-dir ./sanitized_photos --format json --report ./audit.json --yes
 ```
 
-Export a JSON summary:
-
-```bash
-./run.sh batch ./raw_photos --output-dir ./sanitized_photos --format json --yes
-```
-
-The exact options depend on the current CLI implementation. Use the help output if an option is rejected.
+Run the batch command's help output to see all available options.
 
 ## 10. Security and Privacy Notes
 
