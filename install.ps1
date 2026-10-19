@@ -2,42 +2,62 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "=== MetaClean Windows Installer ===" -ForegroundColor Cyan
 
-if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
-    Write-Host "Python 3 is required. Install it from https://www.python.org/downloads/windows/"
-    exit 1
+# Find Python
+$python = Get-Command py -ErrorAction SilentlyContinue
+$pythonArgs = @("-3")
+
+if (-not $python) {
+    $python = Get-Command python -ErrorAction SilentlyContinue
+    $pythonArgs = @()
 }
 
-if (-not (Test-Path (Join-Path $PSScriptRoot "main.py"))) {
-    Write-Error "Run this installer from the MetaClean project folder."
-    exit 1
+if (-not $python) {
+    throw "Python 3 is required. Install it from https://www.python.org/downloads/windows/"
 }
 
-python --version
-
-if (-not (Test-Path (Join-Path $PSScriptRoot "venv"))) {
-    python -m venv (Join-Path $PSScriptRoot "venv")
+& $python.Source @pythonArgs --version
+if ($LASTEXITCODE -ne 0) {
+    throw "Python could not be started."
 }
 
-$venvPython = Join-Path $PSScriptRoot "venv\Scripts\python.exe"
-
-& $venvPython -m pip install --upgrade pip
-if ($LASTEXITCODE -ne 0) { throw "Failed to upgrade pip." }
-
-& $venvPython -m pip install -r (Join-Path $PSScriptRoot "requirements.txt")
-if ($LASTEXITCODE -ne 0) { throw "Failed to install Python dependencies." }
-
-if (-not (Get-Command exiftool -ErrorAction SilentlyContinue)) {
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
-        Write-Host "Installing ExifTool..." -ForegroundColor Yellow
-        winget install --id OliverBetz.ExifTool --exact --accept-package-agreements --accept-source-agreements
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "ExifTool installation may have failed. Install it manually, then reopen PowerShell."
-        }
-    } else {
-        Write-Warning "winget was not found. Install ExifTool manually: https://exiftool.org/"
+# Create an isolated virtual environment
+if (-not (Test-Path ".venv\Scripts\python.exe")) {
+    & $python.Source @pythonArgs -m venv .venv
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to create virtual environment."
     }
 }
 
-Write-Host "`nInstallation steps completed." -ForegroundColor Green
-Write-Host "Close and reopen PowerShell if ExifTool was just installed."
-Write-Host "Then run: .\run.ps1"
+$venvPython = Join-Path $PWD ".venv\Scripts\python.exe"
+
+# Install Python dependencies
+& $venvPython -m pip install --upgrade pip
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to upgrade pip."
+}
+
+& $venvPython -m pip install -r requirements.txt
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to install Python dependencies."
+}
+
+# Check ExifTool
+$exiftool = Get-Command exiftool -ErrorAction SilentlyContinue
+
+if (-not $exiftool) {
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+
+    if ($winget) {
+        Write-Host "Installing ExifTool..." -ForegroundColor Yellow
+        & $winget.Source install --id OliverBetz.ExifTool --exact --accept-package-agreements --accept-source-agreements
+        Write-Host "If installation succeeded, reopen PowerShell."
+    } else {
+        Write-Warning "Install ExifTool manually: https://exiftool.org/"
+    }
+} else {
+    Write-Host "ExifTool found: $($exiftool.Source)" -ForegroundColor Green
+}
+
+Write-Host ""
+Write-Host "Installation steps completed." -ForegroundColor Green
+Write-Host "Run the application using .\run.ps1 --help"

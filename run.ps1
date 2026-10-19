@@ -1,11 +1,17 @@
 $ErrorActionPreference = "Stop"
 
-$python = Join-Path $PSScriptRoot "venv\Scripts\python.exe"
+$python = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
+$main = Join-Path $PSScriptRoot "main.py"
 
 if (-not (Test-Path $python)) {
-    Write-Host "MetaClean is not installed. Run .\install.ps1 first."
+    Write-Error "MetaClean is not installed. Run .\install.ps1 first."
     exit 1
 }
 
-& $python (Join-Path $PSScriptRoot "main.py") @args
+if (-not (Test-Path $main)) {
+    Write-Error "main.py was not found."
+    exit 1
+}
+
+& $python $main @args
 exit $LASTEXITCODE
