@@ -161,33 +161,6 @@ Replace `photo.jpg` with your image path.
 
 MetaClean is a command-line application. Run a subcommand directly; there is no interactive menu.
 
-### Windows PowerShell
-
-Run these commands from the project folder:
-
-```powershell
-.\install.ps1
-.\run.ps1 --help
-.\run.ps1 scan .\photo.jpg
-.\run.ps1 clean .\photo.jpg --output .\cleaned_photo.jpg --yes
-.\run.ps1 verify .\cleaned_photo.jpg
-```
-
-### Linux Mint
-
-Run these commands from the project folder:
-
-```bash
-chmod +x install.sh run.sh
-./install.sh
-./run.sh --help
-./run.sh scan photo.jpg
-./run.sh clean photo.jpg --output cleaned_photo.jpg --yes
-./run.sh verify cleaned_photo.jpg
-```
-
-Replace `photo.jpg` with the path to your image. Keep a backup of important originals.
-
 ## 6. Usage Examples
 
 The examples below assume that the input image is named `photo.jpg` and that commands are run from the project folder.
