@@ -7,7 +7,16 @@ MetaClean is a command-line tool for inspecting image metadata, assessing privac
 - **Target environment:** Linux Mint / Ubuntu
 - **Language:** Python 3
 - **Metadata engine:** ExifTool (recommended)
-- **License:** MIT
+-**License:** MIT
+
+## Screenshots
+
+### 1. Metadata Scan
+![MetaClean metadata scan](docs/images/scan-result.png)
+
+### 2. Cleaning and Verification
+![MetaClean cleaning and verification](docs/images/clean-verification.png)
+
 
 ---
 
