@@ -1,8 +1,9 @@
 $ErrorActionPreference = "Stop"
+Set-Location $PSScriptRoot
 
 Write-Host "=== MetaClean Windows Installer ===" -ForegroundColor Cyan
 
-# Find Python
+# Locate Python
 $python = Get-Command py -ErrorAction SilentlyContinue
 $pythonArgs = @("-3")
 
@@ -20,7 +21,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "Python could not be started."
 }
 
-# Create an isolated virtual environment
+# Create virtual environment
 if (-not (Test-Path ".venv\Scripts\python.exe")) {
     & $python.Source @pythonArgs -m venv .venv
     if ($LASTEXITCODE -ne 0) {
@@ -28,9 +29,9 @@ if (-not (Test-Path ".venv\Scripts\python.exe")) {
     }
 }
 
-$venvPython = Join-Path $PWD ".venv\Scripts\python.exe"
+$venvPython = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 
-# Install Python dependencies
+# Install dependencies
 & $venvPython -m pip install --upgrade pip
 if ($LASTEXITCODE -ne 0) {
     throw "Failed to upgrade pip."
@@ -41,23 +42,37 @@ if ($LASTEXITCODE -ne 0) {
     throw "Failed to install Python dependencies."
 }
 
-# Check ExifTool
+# Locate ExifTool
 $exiftool = Get-Command exiftool -ErrorAction SilentlyContinue
 
 if (-not $exiftool) {
     $winget = Get-Command winget -ErrorAction SilentlyContinue
 
     if ($winget) {
-        Write-Host "Installing ExifTool..." -ForegroundColor Yellow
+        Write-Host "ExifTool not found. Attempting installation with winget..." -ForegroundColor Yellow
+
         & $winget.Source install --id OliverBetz.ExifTool --exact --accept-package-agreements --accept-source-agreements
-        Write-Host "If installation succeeded, reopen PowerShell."
-    } else {
-        Write-Warning "Install ExifTool manually: https://exiftool.org/"
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Automatic ExifTool installation did not complete successfully."
+        }
+
+        # Refresh PATH for this process from the common machine/user locations
+        $env:PATH = [Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
+                    [Environment]::GetEnvironmentVariable("PATH", "User") + ";" +
+                    $env:PATH
+
+        $exiftool = Get-Command exiftool -ErrorAction SilentlyContinue
     }
-} else {
+}
+
+if ($exiftool) {
     Write-Host "ExifTool found: $($exiftool.Source)" -ForegroundColor Green
+} else {
+    Write-Warning "ExifTool was not detected. Install it from https://exiftool.org/ and reopen PowerShell."
+    Write-Warning "Some metadata features may be limited without ExifTool."
 }
 
 Write-Host ""
-Write-Host "Installation steps completed." -ForegroundColor Green
-Write-Host "Run the application using .\run.ps1 --help"
+Write-Host "Python dependencies installed." -ForegroundColor Green
+Write-Host "Next: .\run.ps1 --help"
