@@ -84,14 +84,14 @@ sudo apt install -y git python3 python3-pip python3-venv libimage-exiftool-perl
 Run these commands only if you do not already have the project:
 
 ```bash
-git clone https://github.com/mobadawyx4/MetaClean-.git
-cd MetaClean-
+git clone https://github.com/mobadawyx4/MetaClean.git
+cd MetaClean
 ```
 
 If the project is already on your computer, go to its directory instead:
 
 ```bash
-cd ~/MetaClean-
+cd ~/MetaClean
 ```
 
 #### Step 3 — Install MetaClean
@@ -116,7 +116,7 @@ If you prefer to install dependencies yourself:
 ```bash
 sudo apt update
 sudo apt install -y python3 python3-pip python3-venv libimage-exiftool-perl
-cd ~/MetaClean-
+cd ~/MetaClean
 python3 -m venv venv
 ./venv/bin/python -m pip install --upgrade pip
 ./venv/bin/python -m pip install -r requirements.txt
@@ -139,6 +139,33 @@ To check whether MetaClean detects ExifTool:
 ```bash
 ./venv/bin/python -c "import config; print('ExifTool Available:', config.EXIFTOOL_AVAILABLE, config.EXIFTOOL_PATH)"
 ```
+
+### Windows (PowerShell)
+
+**Requirements:** Python 3 and Windows PowerShell. Install Python from https://www.python.org/downloads/windows/ and enable Python on PATH.
+
+1. Install ExifTool using WinGet:
+
+   ```powershell
+   winget install --id OliverBetz.ExifTool --exact
+   ```
+
+2. Open PowerShell in the MetaClean project folder.
+
+3. Install dependencies:
+
+   ```powershell
+   .\install.ps1
+   ```
+
+4. Run MetaClean:
+
+   ```powershell
+   .\run.ps1 --help
+   .\run.ps1 scan photo.jpg
+   ```
+
+Replace `photo.jpg` with your image path. If ExifTool was just installed, reopen PowerShell.
 
 ## 5. Quick Start
 
@@ -336,12 +363,14 @@ Run a specific test module:
 ## 14. Project Structure
 
 ```text
-MetaClean-/
+MetaClean/
 ├── main.py
 ├── config.py
 ├── requirements.txt
 ├── install.sh
+├── install.ps1
 ├── run.sh
+├── run.ps1
 ├── modules/
 │   ├── image_validator.py
 │   ├── metadata_scanner.py
