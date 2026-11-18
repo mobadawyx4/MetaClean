@@ -1,34 +1,49 @@
 """Metadata removal engine with ExifTool and Pillow fallback.
 
-Safely strips all metadata or selective categories from images without modifying
-the original input. Preserves image pixel quality, transparency, orientation,
-and handles temporary files securely.
+Safety guarantees:
+* The original input file is never modified: cleaning happens on a private
+  temporary copy in the destination directory, which is atomically moved into
+  place only after ExifTool succeeds.
+* The output path may not be identical to the input (inode/hardlink aware) and
+  may not be a symbolic link.
+* The cleaned output is re-opened and validated before success is reported.
+* A successful ExifTool exit code is not treated as proof of removal; the
+  verifier performs an independent scan afterwards.
 """
 
 from __future__ import annotations
 
 import os
-import shutil
-import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Set, Tuple
+from typing import List, Optional, Tuple
 
 from PIL import Image, ImageOps
 
 import config
-from modules.image_validator import ImageValidationError, ValidationResult, safe_resolve_path, validate_image
+from modules.exiftool_backend import ExifToolBackend
+from modules.image_validator import (
+    FileIdentity,
+    ImageValidationError,
+    ValidationResult,
+    copy_regular_file_no_follow,
+    file_identity,
+    is_symlink,
+    safe_resolve_path,
+    validate_image,
+)
+from modules.sanitizer_profiles import PROFILES, get_profile
 
 
 class RemovalError(Exception):
     """Raised when metadata removal fails."""
-    pass
 
 
 @dataclass
 class RemovalResult:
     """Result of metadata sanitization process."""
+
     success: bool
     input_path: Path
     output_path: Path
@@ -40,17 +55,27 @@ class RemovalResult:
     warnings: List[str] = field(default_factory=list)
     original_size: int = 0
     cleaned_size: int = 0
+    profile: Optional[str] = None
+    operations_attempted: List[str] = field(default_factory=list)
+    exiftool_args: List[str] = field(default_factory=list)
+    output_validated: bool = False
+    output_created: bool = False
+    tags_updated_count: Optional[int] = None
 
     @property
     def bytes_saved(self) -> int:
         return max(0, self.original_size - self.cleaned_size)
 
+    @property
+    def size_delta(self) -> int:
+        return self.cleaned_size - self.original_size
 
-def validate_categories(categories_input: str | List[str]) -> Tuple[List[str], List[str]]:
+
+def validate_categories(
+    categories_input: str | List[str],
+    default_all: bool = True,
+) -> Tuple[List[str], List[str]]:
     """Validates requested categories against supported options.
-
-    Args:
-        categories_input: Comma-separated string or list of category strings.
 
     Returns:
         Tuple of (valid_categories_list, invalid_categories_list).
@@ -58,7 +83,7 @@ def validate_categories(categories_input: str | List[str]) -> Tuple[List[str], L
     if isinstance(categories_input, str):
         raw_items = [c.strip().lower() for c in categories_input.split(",") if c.strip()]
     else:
-        raw_items = [c.strip().lower() for c in categories_input if c.strip()]
+        raw_items = [c.strip().lower() for c in categories_input if str(c).strip()]
 
     valid: List[str] = []
     invalid: List[str] = []
@@ -70,10 +95,22 @@ def validate_categories(categories_input: str | List[str]) -> Tuple[List[str], L
         else:
             invalid.append(item)
 
-    if not valid and not invalid:
+    if not valid and not invalid and default_all:
         valid = ["all"]
 
     return valid, invalid
+
+
+def _describe_operations(categories: List[str]) -> List[str]:
+    operations: List[str] = []
+    if "all" in categories:
+        operations.append("Strip all writable metadata blocks (EXIF, GPS, IPTC, XMP, MakerNotes).")
+        operations.append("Preserve colour-space/ICC and orientation tags required for correct rendering.")
+        return operations
+    for category in categories:
+        definition = config.METADATA_CATEGORIES.get(category, {})
+        operations.append(f"Remove category '{category}': {definition.get('description', category)}.")
+    return operations
 
 
 class MetadataRemover:
@@ -86,87 +123,105 @@ class MetadataRemover:
         else:
             self.exiftool_path = config.EXIFTOOL_PATH
             self.exiftool_available = config.EXIFTOOL_AVAILABLE
+        self.backend = ExifToolBackend(path=self.exiftool_path)
+        if not self.exiftool_available:
+            self.backend.available = False
+
+    # ------------------------------------------------------------------
+    # ExifTool cleaning
+    # ------------------------------------------------------------------
+    def _build_exiftool_args(self, categories: List[str]) -> List[str]:
+        args: List[str] = []
+        if "all" in categories:
+            # Strip everything, then restore colour-space and orientation tags from
+            # the same file so rendering is not altered.
+            args.extend(
+                ["-all=", "-tagsFromFile", "@", "-ColorSpaceTags", "-Orientation"]
+            )
+        else:
+            for category in categories:
+                definition = config.METADATA_CATEGORIES.get(category)
+                if definition and "exiftool_args" in definition:
+                    args.extend(str(a) for a in definition["exiftool_args"])  # type: ignore[index]
+        return args
 
     def _clean_with_exiftool(
-        self,
-        temp_file: Path,
-        categories: List[str]
-    ) -> Tuple[bool, List[str], List[str]]:
-        """Executes ExifTool with safe argument lists on a temporary copy.
+        self, temp_file: Path, categories: List[str]
+    ) -> Tuple[bool, List[str], List[str], List[str], Optional[int]]:
+        """Cleans a temporary working copy with ExifTool.
 
         Returns:
-            Tuple of (success, errors, warnings).
+            (success, errors, warnings, args, updated_count)
         """
         errors: List[str] = []
         warnings: List[str] = []
+        args = self._build_exiftool_args(categories)
 
-        cmd: List[str] = [str(self.exiftool_path)]
+        result = self.backend.write(temp_file, args)
+        updated = self.backend.count_updated(result)
 
-        if "all" in categories:
-            # Full cleaning: strip all metadata, preserve colorspace tags to prevent color distortion
-            cmd.extend(["-all=", "-tagsFromFile", "@", "-ColorSpaceTags"])
-        else:
-            # Selective category removal
-            for cat in categories:
-                cat_def = config.METADATA_CATEGORIES.get(cat)
-                if cat_def and "exiftool_args" in cat_def:
-                    cmd.extend(cat_def["exiftool_args"])  # type: ignore
-
-        # Overwrite in-place on the temporary working file
-        cmd.extend(["-overwrite_original", str(temp_file)])
-
-        try:
-            res = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=config.SUBPROCESS_TIMEOUT_SECONDS,
-                check=False
+        if not result.ok:
+            errors.append(
+                result.diagnostics or f"ExifTool failed with exit code {result.returncode}."
             )
-            if res.returncode != 0:
-                errors.append(f"ExifTool execution failed (code {res.returncode}): {res.stderr.strip()}")
-                return False, errors, warnings
+            return False, errors, warnings, args, updated
 
-            if "0 image files updated" in res.stdout and "1 image files unchanged" in res.stdout:
-                warnings.append("ExifTool reported 0 tags updated (image may have had no matching metadata).")
+        if updated == 0:
+            warnings.append(
+                "ExifTool reported that no tags were updated; the requested fields may have "
+                "already been absent, or the format may not support this operation."
+            )
+        elif updated is None:
+            # ExifTool did not print the "N image files updated" summary line, so
+            # we cannot prove anything was removed.  Warn rather than stay silent.
+            warnings.append(
+                "ExifTool did not report how many tags were updated; removal success could not "
+                "be confirmed from the tool's own summary. Verify the output independently."
+            )
 
-            return True, errors, warnings
+        return True, errors, warnings, args, updated
 
-        except subprocess.TimeoutExpired:
-            errors.append(f"ExifTool operation timed out after {config.SUBPROCESS_TIMEOUT_SECONDS}s.")
-            return False, errors, warnings
-        except OSError as e:
-            errors.append(f"Subprocess invocation failed: {e}")
-            return False, errors, warnings
-
+    # ------------------------------------------------------------------
+    # Pillow fallback
+    # ------------------------------------------------------------------
     def _clean_with_pillow_fallback(
         self,
         src_path: Path,
         dest_path: Path,
         categories: List[str],
-        val_res: ValidationResult
+        val_res: ValidationResult,
     ) -> Tuple[bool, List[str], List[str]]:
-        """Fallback metadata stripper when ExifTool is unavailable.
+        """Rebuilds the image without metadata when ExifTool is unavailable.
 
-        Preserves pixel values, transparency, and animation frames.
+        Only full cleaning is supported: a pixel rebuild cannot selectively
+        target metadata groups.
         """
         errors: List[str] = []
         warnings = [
-            "ExifTool is unavailable; metadata removed using Pillow fallback engine.",
-            "Selective category removal is limited under Pillow fallback; performing clean rebuild."
+            "ExifTool is unavailable; metadata removed using the Pillow fallback engine.",
+            "The fallback re-encodes the image, so pixel data may change slightly.",
         ]
+
+        if "all" not in categories:
+            return (
+                False,
+                [
+                    "Selective metadata removal requires ExifTool. Install ExifTool or request "
+                    "full cleaning ('all')."
+                ],
+                warnings,
+            )
 
         try:
             with Image.open(src_path) as img:
-                # Handle orientation normalization before stripping EXIF
                 try:
                     img = ImageOps.exif_transpose(img) or img
                 except Exception:
-                    pass
+                    warnings.append("EXIF orientation could not be applied before re-encoding.")
 
                 fmt = img.format or (val_res.format_name if val_res else "PNG")
+                save_kwargs = {}
 
-                # Handle animated images
                 if getattr(img, "is_animated", False) and getattr(img, "n_frames", 1) > 1:
                     frames = []
                     durations = []
@@ -174,103 +229,312 @@ class MetadataRemover:
                         img.seek(frame_idx)
                         frames.append(img.copy())
                         durations.append(img.info.get("duration", 100))
-
-                    # Save frames without original metadata
-                    first_frame = frames[0]
-                    save_kwargs = {
-                        "save_all": True,
-                        "append_images": frames[1:],
-                        "duration": durations,
-                        "loop": img.info.get("loop", 0),
-                    }
-                    first_frame.save(dest_path, format=fmt, **save_kwargs)
+                    save_kwargs.update(
+                        {
+                            "save_all": True,
+                            "append_images": frames[1:],
+                            "duration": durations,
+                            "loop": img.info.get("loop", 0),
+                        }
+                    )
+                    first = frames[0]
                 else:
-                    # Static image: create clean copy
-                    # Save without passing exif or info metadata dict
-                    save_kwargs = {}
-                    if fmt == "JPEG":
-                        save_kwargs["quality"] = 95
-                        save_kwargs["optimize"] = True
-                    elif fmt == "PNG":
-                        save_kwargs["optimize"] = True
+                    first = img.copy()
 
-                    # Convert mode if needed for format
-                    clean_img = img.copy()
-                    clean_img.save(dest_path, format=fmt, **save_kwargs)
+                if fmt == "JPEG":
+                    save_kwargs.update({"quality": 95, "optimize": True})
+                elif fmt == "PNG":
+                    save_kwargs.update({"optimize": True})
+                elif fmt == "WEBP":
+                    save_kwargs.update({"quality": 95})
+
+                first.save(dest_path, format=fmt, **save_kwargs)
 
             return True, errors, warnings
-
-        except Exception as e:
-            errors.append(f"Pillow fallback cleaning failed: {e}")
+        except Exception as exc:
+            errors.append(f"Pillow fallback cleaning failed: {exc}")
             return False, errors, warnings
 
+    # ------------------------------------------------------------------
+    # Staged output helpers (F-06 / F-07)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _create_temp_file(directory: Path, suffix: str) -> Tuple[Path, Optional[FileIdentity]]:
+        """Creates an empty private working file in the destination directory.
+
+        The file is created before the backup/cleaning step so that the final
+        ``os.replace`` stays on the same filesystem and is therefore atomic.
+        """
+        fd, name = tempfile.mkstemp(prefix=".metaclean-", suffix=suffix, dir=str(directory))
+        os.close(fd)
+        path = Path(name)
+        return path, file_identity(path)
+
+    @staticmethod
+    def _discard_temp(path: Optional[Path], identity: Optional[FileIdentity]) -> None:
+        """Removes a temporary file only when it is still the file we created.
+
+        A path whose inode changed is left alone: deleting it would destroy an
+        unrelated file that happened to be moved into our temp name.
+        """
+        if path is None:
+            return
+        current = file_identity(path)
+        if current is None:
+            return
+        if not current.is_same_entry(identity):
+            return
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+    def _validate_working_copy(
+        self,
+        temp_path: Path,
+        val_res: ValidationResult,
+        errors: List[str],
+    ) -> bool:
+        """Structural validation that must pass before installation."""
+        temp_check = validate_image(temp_path)
+        if not temp_check.is_valid:
+            errors.append(
+                "Cleaned working copy failed readability validation: "
+                + "; ".join(temp_check.errors)
+            )
+            return False
+        if temp_check.file_size == 0:
+            errors.append("Cleaned working copy is empty.")
+            return False
+        if temp_check.dimensions and val_res.dimensions:
+            if sorted(temp_check.dimensions) != sorted(val_res.dimensions):
+                errors.append(
+                    f"Output dimensions {temp_check.dimensions} do not match input "
+                    f"dimensions {val_res.dimensions}."
+                )
+                return False
+        return True
+
+    def _install_validated_output(
+        self,
+        temp_path: Path,
+        temp_identity: Optional[FileIdentity],
+        out_p: Path,
+        dest_identity: Optional[FileIdentity],
+        parent_identity: Optional[FileIdentity],
+        overwrite_output: bool,
+    ) -> None:
+        """Atomically installs a validated working copy over the destination.
+
+        Every check below runs immediately before ``os.replace`` so a symlink
+        swap or concurrent replacement is refused instead of being followed or
+        silently overwritten.  Raises ``RemovalError`` when installation is not
+        safe; the caller keeps the destination untouched and discards the temp
+        file.
+        """
+        current_parent = file_identity(out_p.parent)
+        if (
+            parent_identity is not None
+            and current_parent is not None
+            and current_parent.key != parent_identity.key
+        ):
+            raise RemovalError(
+                "Security violation: the output directory changed during cleaning; "
+                "refusing to install the cleaned file."
+            )
+
+        if is_symlink(out_p):
+            raise RemovalError(
+                "Security violation: refusing to replace a symbolic link at the output path."
+            )
+
+        current_dest = file_identity(out_p)
+        if current_dest is not None:
+            if not overwrite_output:
+                raise RemovalError(
+                    f"Output file appeared during cleaning and overwrite was not requested: {out_p}"
+                )
+            if dest_identity is None or not current_dest.is_same_entry(dest_identity):
+                raise RemovalError(
+                    "Security violation: the output file changed during cleaning; "
+                    "refusing to replace it."
+                )
+
+        current_temp = file_identity(temp_path)
+        if current_temp is None:
+            raise RemovalError("The cleaned working copy disappeared before installation.")
+        if not current_temp.is_same_entry(temp_identity):
+            raise RemovalError(
+                "Security violation: the temporary output was replaced before installation; "
+                "refusing to continue."
+            )
+
+        os.replace(temp_path, out_p)
+
+    # ------------------------------------------------------------------
+    # Public entry point
+    # ------------------------------------------------------------------
     def clean(
         self,
         input_path: str | Path,
         output_path: str | Path,
         categories: Optional[List[str] | str] = None,
         overwrite_output: bool = False,
+        profile: Optional[str] = None,
     ) -> RemovalResult:
-        """Removes metadata from an image and writes to output_path.
+        """Removes metadata from an image and writes a new output file.
 
-        Ensures the original input is strictly preserved and never modified.
+        Args:
+            input_path: Original image; never modified.
+            output_path: Destination for the cleaned copy.
+            categories: Categories to remove. Ignored when ``profile`` supplies them.
+            overwrite_output: Allow replacing an existing output file.
+            profile: Optional sanitization profile key.
         """
-        # Resolve input safely
         try:
-            in_p = safe_resolve_path(input_path, must_exist=True)
-        except ImageValidationError as e:
+            in_p = safe_resolve_path(input_path, must_exist=True, role="input file")
+        except ImageValidationError as exc:
             return RemovalResult(
                 success=False,
                 input_path=Path(input_path),
                 output_path=Path(output_path),
                 categories_requested=[],
-                errors=[str(e)]
+                errors=[str(exc)],
             )
 
-        # Resolve output safely
         try:
-            out_p = safe_resolve_path(output_path, must_exist=False)
-        except ImageValidationError as e:
+            out_p = safe_resolve_path(output_path, must_exist=False, role="output file")
+        except ImageValidationError as exc:
             return RemovalResult(
                 success=False,
                 input_path=in_p,
                 output_path=Path(output_path),
                 categories_requested=[],
-                errors=[str(e)]
+                errors=[str(exc)],
             )
 
-        # Strict safety check: output cannot be the same file as input
-        if in_p.resolve() == out_p.resolve():
+        # Defence in depth: safe_resolve_path already refuses a symlink final
+        # component, but re-check after resolution in case the link was created
+        # in between.  A symlinked destination must never be followed or
+        # replaced: os.replace would either clobber the link target or unlink
+        # the link, both of which surprise the user.
+        if is_symlink(out_p):
             return RemovalResult(
                 success=False,
                 input_path=in_p,
                 output_path=out_p,
                 categories_requested=[],
-                errors=["Security violation: Output path must not be identical to original input path."]
+                errors=["Security violation: refusing to write through a symbolic link at the output path."],
             )
 
-        # Check existing output
-        if out_p.exists() and not overwrite_output:
+        if out_p.exists() and out_p.is_dir():
             return RemovalResult(
                 success=False,
                 input_path=in_p,
                 output_path=out_p,
                 categories_requested=[],
-                errors=[f"Output file already exists: {out_p}. Specify overwrite/yes to proceed."]
+                errors=["Output path is a directory, not a file."],
             )
 
-        # Validate categories
-        cat_list, invalid_cats = validate_categories(categories or ["all"])
+        # Identities are captured once and re-checked immediately before the
+        # atomic replace, so a same-file alias (hardlink, ``..``, symlinked
+        # parent) cannot be mistaken for a fresh destination.
+        in_identity = file_identity(in_p)
+        if in_identity is None:
+            return RemovalResult(
+                success=False,
+                input_path=in_p,
+                output_path=out_p,
+                categories_requested=[],
+                errors=["Input file could not be inspected; it may have been removed."],
+            )
+        dest_identity = file_identity(out_p)
+
+        same_file = False
+        if dest_identity is not None:
+            try:
+                same_file = os.path.samefile(in_p, out_p)
+            except OSError:
+                same_file = in_identity.key == dest_identity.key
+        else:
+            same_file = in_p.resolve() == out_p.resolve()
+        if same_file:
+            return RemovalResult(
+                success=False,
+                input_path=in_p,
+                output_path=out_p,
+                categories_requested=[],
+                errors=["Security violation: Output path must not be identical to the original input."],
+            )
+
+        if dest_identity is not None and not overwrite_output:
+            return RemovalResult(
+                success=False,
+                input_path=in_p,
+                output_path=out_p,
+                categories_requested=[],
+                errors=[f"Output file already exists: {out_p}. Specify overwrite/yes to proceed."],
+            )
+
+        # Resolve the profile/category set.
+        resolved_profile: Optional[str] = profile
+        if profile:
+            profile_obj = get_profile(profile)
+            if profile_obj is None:
+                return RemovalResult(
+                    success=False,
+                    input_path=in_p,
+                    output_path=out_p,
+                    categories_requested=[],
+                    errors=[f"Unknown sanitization profile '{profile}'."],
+                    profile=profile,
+                )
+            if profile_obj.key == "custom":
+                if not categories:
+                    return RemovalResult(
+                        success=False,
+                        input_path=in_p,
+                        output_path=out_p,
+                        categories_requested=[],
+                        errors=["The 'custom' profile requires at least one category to remove."],
+                        profile=resolved_profile,
+                    )
+                cat_list, invalid_cats = validate_categories(categories, default_all=False)
+            else:
+                cat_list = list(profile_obj.categories)
+                invalid_cats = []
+        else:
+            if categories is not None and len(categories) == 0:
+                return RemovalResult(
+                    success=False,
+                    input_path=in_p,
+                    output_path=out_p,
+                    categories_requested=[],
+                    errors=["No valid metadata categories specified for removal."],
+                    profile=resolved_profile,
+                )
+            cat_list, invalid_cats = validate_categories(categories or ["all"], default_all=False)
+
         if invalid_cats:
             return RemovalResult(
                 success=False,
                 input_path=in_p,
                 output_path=out_p,
                 categories_requested=cat_list,
-                errors=[f"Invalid metadata category name(s): {', '.join(invalid_cats)}"]
+                errors=[f"Invalid metadata category name(s): {', '.join(invalid_cats)}"],
+                profile=resolved_profile,
             )
 
-        # Pre-validate input image
+        if not cat_list:
+            return RemovalResult(
+                success=False,
+                input_path=in_p,
+                output_path=out_p,
+                categories_requested=[],
+                errors=["No valid metadata categories specified for removal."],
+                profile=resolved_profile,
+            )
+
         val_res = validate_image(in_p)
         if not val_res.is_valid:
             return RemovalResult(
@@ -278,104 +542,183 @@ class MetadataRemover:
                 input_path=in_p,
                 output_path=out_p,
                 categories_requested=cat_list,
-                errors=[f"Input image failed validation: {'; '.join(val_res.errors)}"]
+                errors=[f"Input image failed validation: {'; '.join(val_res.errors)}"],
+                profile=resolved_profile,
             )
 
         orig_size = in_p.stat().st_size
         warnings: List[str] = []
         errors: List[str] = []
+        operations = _describe_operations(cat_list)
+        output_created = dest_identity is None
 
         if "all" not in cat_list:
             warnings.append(
                 f"Selective metadata removal active ({', '.join(cat_list)}). "
-                "Warning: Unselected metadata categories may still contain identifying information!"
+                "Unselected metadata categories may still contain identifying information."
             )
 
-        # Ensure output directory exists
-        out_p.parent.mkdir(parents=True, exist_ok=True)
+        def _failure(
+            *,
+            method: str = "unknown",
+            args_list: Optional[List[str]] = None,
+            updated_count: Optional[int] = None,
+        ) -> RemovalResult:
+            return RemovalResult(
+                success=False,
+                input_path=in_p,
+                output_path=out_p,
+                categories_requested=cat_list,
+                method_used=method,
+                errors=errors,
+                warnings=warnings,
+                original_size=orig_size,
+                profile=resolved_profile,
+                operations_attempted=operations,
+                exiftool_args=list(args_list or []),
+                output_validated=False,
+                tags_updated_count=updated_count,
+            )
 
-        # Determine method and execute
-        if self.exiftool_available and self.exiftool_path:
-            method_used = "exiftool_lossless"
-            # Create a secure temporary file in the same directory or tempdir
-            with tempfile.NamedTemporaryFile(
-                delete=False,
-                suffix=in_p.suffix,
-                dir=out_p.parent
-            ) as tmp_file:
-                temp_path = Path(tmp_file.name)
+        try:
+            out_p.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            errors.append(f"Could not create the output directory: {exc}")
+            return _failure()
+        parent_identity = file_identity(out_p.parent)
 
-            try:
-                # Copy original bytes to temp working file
-                shutil.copyfile(in_p, temp_path)
+        args: List[str] = []
+        updated: Optional[int] = None
+        output_validated = False
+        method_used = (
+            "exiftool_lossless"
+            if (self.exiftool_available and self.exiftool_path)
+            else "pillow_fallback"
+        )
 
-                success, tool_errors, tool_warnings = self._clean_with_exiftool(
+        try:
+            temp_path, temp_identity = self._create_temp_file(out_p.parent, in_p.suffix)
+        except OSError as exc:
+            errors.append(f"Could not create a temporary working file: {exc}")
+            return _failure(method=method_used)
+
+        try:
+            if method_used == "exiftool_lossless":
+                # Descriptor-level copy with identity verification: a swapped
+                # input path cannot redirect the copy to a different file.
+                try:
+                    copy_regular_file_no_follow(in_p, temp_path, expected_identity=in_identity)
+                except (ImageValidationError, OSError) as exc:
+                    errors.append(f"Could not create the working copy: {exc}")
+                    return _failure(method=method_used)
+
+                success, tool_errors, tool_warnings, args, updated = self._clean_with_exiftool(
                     temp_path, cat_list
                 )
+                # The backend rewrites the working file; re-capture its identity
+                # so a failed run still cleans up the file it actually wrote.
+                temp_identity = file_identity(temp_path) or temp_identity
                 errors.extend(tool_errors)
                 warnings.extend(tool_warnings)
-
-                if success:
-                    # Safely move sanitized temp file to destination
-                    if out_p.exists():
-                        out_p.unlink()
-                    shutil.move(str(temp_path), str(out_p))
-                else:
-                    if temp_path.exists():
-                        temp_path.unlink()
-                    return RemovalResult(
-                        success=False,
-                        input_path=in_p,
-                        output_path=out_p,
-                        categories_requested=cat_list,
-                        method_used=method_used,
-                        errors=errors,
-                        warnings=warnings,
-                        original_size=orig_size,
+                if not success:
+                    return _failure(
+                        method=method_used, args_list=args, updated_count=updated
                     )
+            else:
+                # The fallback reads the source path itself; confirm it is still
+                # the file that was validated before re-encoding.
+                current_input = file_identity(in_p)
+                if current_input is None or not current_input.is_same_entry(in_identity):
+                    errors.append(
+                        "Security violation: the input file changed between validation and "
+                        "cleaning; refusing to continue."
+                    )
+                    return _failure(method=method_used)
 
-            except Exception as e:
-                if temp_path.exists():
-                    temp_path.unlink()
-                return RemovalResult(
-                    success=False,
-                    input_path=in_p,
-                    output_path=out_p,
-                    categories_requested=cat_list,
-                    method_used=method_used,
-                    errors=[f"Unexpected error during removal: {e}"],
-                    warnings=warnings,
-                    original_size=orig_size,
+                success, tool_errors, tool_warnings = self._clean_with_pillow_fallback(
+                    in_p, temp_path, cat_list, val_res
+                )
+                temp_identity = file_identity(temp_path) or temp_identity
+                errors.extend(tool_errors)
+                warnings.extend(tool_warnings)
+                if not success:
+                    return _failure(method=method_used)
+
+            # Snapshot the working copy before validating it, so the file that
+            # was validated is provably the file that gets installed.  (The
+            # snapshot above, taken right after the backend step, is the same
+            # entry; it is re-read here to keep the invariant local.)
+            temp_identity = file_identity(temp_path) or temp_identity
+            if temp_identity is None or not temp_identity.is_regular_file:
+                errors.append(
+                    "The cleaned working copy is missing or is not a regular file."
+                )
+                return _failure(
+                    method=method_used, args_list=args, updated_count=updated
                 )
 
-        else:
-            method_used = "pillow_fallback"
-            success, tool_errors, tool_warnings = self._clean_with_pillow_fallback(
-                in_p, out_p, cat_list, val_res
-            )
-            errors.extend(tool_errors)
-            warnings.extend(tool_warnings)
-            if not success:
-                return RemovalResult(
-                    success=False,
-                    input_path=in_p,
-                    output_path=out_p,
-                    categories_requested=cat_list,
-                    method_used=method_used,
-                    errors=errors,
-                    warnings=warnings,
-                    original_size=orig_size,
+            # F-07: the destination is untouched until the working copy passes
+            # structural validation (readable, non-empty, same dimensions).
+            if not self._validate_working_copy(temp_path, val_res, errors):
+                return _failure(
+                    method=method_used, args_list=args, updated_count=updated
                 )
 
-        cleaned_size = out_p.stat().st_size if out_p.exists() else 0
+            # The working copy must still be the entry that was validated;
+            # otherwise a swap could install unvalidated bytes.
+            validated_temp = file_identity(temp_path)
+            if (
+                validated_temp is None
+                or not validated_temp.is_same_entry(temp_identity)
+            ):
+                errors.append(
+                    "Security violation: the temporary output changed during "
+                    "validation; refusing to continue."
+                )
+                return _failure(
+                    method=method_used, args_list=args, updated_count=updated
+                )
+            temp_identity = validated_temp
 
-        # Calculate preserved and removed categories
-        if "all" in cat_list:
-            removed_cats = [c for c in config.METADATA_CATEGORIES if c != "all"]
-            preserved_cats = []
-        else:
-            removed_cats = list(cat_list)
-            preserved_cats = [c for c in config.METADATA_CATEGORIES if c != "all" and c not in cat_list]
+            try:
+                self._install_validated_output(
+                    temp_path=temp_path,
+                    temp_identity=temp_identity,
+                    out_p=out_p,
+                    dest_identity=dest_identity,
+                    parent_identity=parent_identity,
+                    overwrite_output=overwrite_output,
+                )
+            except RemovalError as exc:
+                errors.append(str(exc))
+                return _failure(
+                    method=method_used, args_list=args, updated_count=updated
+                )
+
+            # From here the validated copy is the destination.  A pre-existing
+            # destination has been atomically replaced and cannot be restored,
+            # so no code below is allowed to delete or rewrite the output.
+            output_validated = True
+            temp_path = None  # consumed by os.replace
+            try:
+                cleaned_size = out_p.stat().st_size
+            except OSError:
+                cleaned_size = 0
+        except Exception as exc:
+            errors.append(f"Unexpected error during removal: {exc}")
+            return _failure(method=method_used, args_list=args, updated_count=updated)
+        finally:
+            self._discard_temp(temp_path, temp_identity)
+        removed_cats = (
+            [c for c in config.METADATA_CATEGORIES if c != "all"]
+            if "all" in cat_list
+            else list(cat_list)
+        )
+        preserved_cats = (
+            []
+            if "all" in cat_list
+            else [c for c in config.METADATA_CATEGORIES if c != "all" and c not in cat_list]
+        )
 
         return RemovalResult(
             success=True,
@@ -389,4 +732,10 @@ class MetadataRemover:
             warnings=warnings,
             original_size=orig_size,
             cleaned_size=cleaned_size,
+            profile=resolved_profile,
+            operations_attempted=operations,
+            exiftool_args=args,
+            output_validated=output_validated,
+            output_created=output_created,
+            tags_updated_count=updated,
         )

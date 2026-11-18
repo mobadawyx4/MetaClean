@@ -101,9 +101,19 @@ def test_batch_summary_csv_export(temp_dir: Path) -> None:
         reader = csv.DictReader(f)
         rows = list(reader)
         assert len(rows) == 1
-        assert rows[0]["file_name"] == "pic1.jpg"
+        # F-08: batch exports are redacted by default, so the filename is
+        # replaced with a positional label and the path is withheld.
+        assert rows[0]["file_name"] == "image_001"
+        assert rows[0]["output_path"] == "[REDACTED]"
         assert rows[0]["verification_status"] == "PASS"
         assert rows[0]["gps_detected"] == "True"
+
+    unredacted_out = temp_dir / "batch_report_unredacted.csv"
+    export_batch_csv(records, unredacted_out, redact=False)
+    with open(unredacted_out, "r", encoding="utf-8") as f:
+        raw_rows = list(csv.DictReader(f))
+    assert raw_rows[0]["file_name"] == "pic1.jpg"
+    assert raw_rows[0]["output_path"] == str(temp_dir / "cleaned" / "pic1.jpg")
 
 
 def test_batch_preserves_original_files(temp_dir: Path) -> None:

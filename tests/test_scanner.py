@@ -11,7 +11,11 @@ from modules.privacy_analyzer import RiskLevel, RuleBasedPrivacyAnalyzer
 
 
 def test_scan_jpeg_with_gps_and_date(jpeg_with_gps_and_date: Path) -> None:
-    """Verifies GPS and date extraction and HIGH privacy risk assessment."""
+    """Verifies GPS and date extraction and CRITICAL privacy risk assessment.
+
+    GPS coordinates are treated as CRITICAL because they directly locate a
+    person's home/workplace and are not revocable after disclosure.
+    """
     scanner = MetadataScanner()
     res = scanner.scan(jpeg_with_gps_and_date)
 
@@ -20,13 +24,13 @@ def test_scan_jpeg_with_gps_and_date(jpeg_with_gps_and_date: Path) -> None:
     assert len(res.categories["gps"].tags) > 0
 
     assert res.privacy_report is not None
-    assert res.privacy_report.overall_risk == RiskLevel.HIGH
+    assert res.privacy_report.overall_risk == RiskLevel.CRITICAL
     assert res.privacy_report.risk_score >= 70
     assert res.privacy_report.high_risk_count > 0
 
     # Ensure GPS explanation is included
-    high_items = [i for i in res.privacy_report.items if i.risk_level == RiskLevel.HIGH]
-    assert any("geographical coordinates" in i.explanation.lower() for i in high_items)
+    critical_items = [i for i in res.privacy_report.items if i.risk_level == RiskLevel.CRITICAL]
+    assert any("geographic coordinates" in i.explanation.lower() for i in critical_items)
 
 
 def test_scan_jpeg_with_device_and_author(jpeg_with_exif: Path) -> None:
@@ -98,14 +102,14 @@ def test_privacy_analyzer_direct_rules() -> None:
     """Unit test for RuleBasedPrivacyAnalyzer tag classification."""
     analyzer = RuleBasedPrivacyAnalyzer()
 
-    # High risk GPS
+    # Critical risk GPS (coordinates pinpoint a real-world location)
     item_gps = analyzer.evaluate_tag("GPSLatitude", "37.7749", group="GPS")
-    assert item_gps.risk_level == RiskLevel.HIGH
+    assert item_gps.risk_level == RiskLevel.CRITICAL
     assert "37.7749" in item_gps.value_preview
 
-    # Medium risk Serial Number
+    # High risk Serial Number (persistent hardware fingerprint)
     item_serial = analyzer.evaluate_tag("SerialNumber", "SN12345678", group="ExifIFD")
-    assert item_serial.risk_level == RiskLevel.MEDIUM
+    assert item_serial.risk_level == RiskLevel.HIGH
     assert "****" in item_serial.value_preview
 
     # Low risk technical ISO

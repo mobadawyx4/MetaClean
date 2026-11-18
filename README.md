@@ -1,13 +1,14 @@
 # MetaClean
-### Image Metadata Scanner, Privacy Risk Analyzer & Sanitizer
 
-MetaClean is a command-line tool for inspecting image metadata, assessing privacy risks, removing supported metadata, and verifying the cleaned result.
+### Image Metadata Intelligence, Privacy Analysis & Sanitization Platform
+
+MetaClean is a command-line platform for exhaustively inspecting image metadata, explaining its privacy impact, removing it safely, and independently verifying that the removal worked.
 
 - **Project type:** Cybersecurity graduation project
-- **Target environment:** Linux Mint / Ubuntu
-- **Language:** Python 3
-- **Metadata engine:** ExifTool (recommended)
--**License:** MIT
+- **Target environment:** Linux Mint / Ubuntu (also runs on POSIX and Windows)
+- **Language:** Python 3.10+
+- **Metadata engine:** ExifTool (recommended) with a Pillow fallback
+- **License:** MIT
 
 ## Screenshots
 
@@ -17,113 +18,97 @@ MetaClean is a command-line tool for inspecting image metadata, assessing privac
 ### 2. Cleaning and Verification
 ![MetaClean cleaning and verification](docs/images/clean-verification.png)
 
-
 ---
 
 ## Table of Contents
 
 1. [Overview](#1-overview)
-2. [Features](#2-features)
-3. [Requirements](#3-requirements)
-4. [Installation](#4-installation)
-5. [Quick Start](#5-quick-start)
-6. [Usage Examples](#6-usage-examples)
-7. [Selective Metadata Removal](#7-selective-metadata-removal)
-8. [Verification Results](#8-verification-results)
-9. [Batch Processing](#9-batch-processing)
-10. [Security and Privacy Notes](#10-security-and-privacy-notes)
-11. [Supported Formats](#11-supported-formats)
-12. [Running Tests](#12-running-tests)
-13. [Limitations](#13-limitations)
-14. [Project Structure](#14-project-structure)
-15. [License](#15-license)
+2. [What is new in 2.0](#2-what-is-new-in-20)
+3. [Features](#3-features)
+4. [Requirements](#4-requirements)
+5. [Installation](#5-installation)
+6. [Quick Start](#6-quick-start)
+7. [Commands](#7-commands)
+8. [Scan modes](#8-scan-modes)
+9. [Sanitization profiles](#9-sanitization-profiles)
+10. [Verification outcomes](#10-verification-outcomes)
+11. [Batch processing](#11-batch-processing)
+12. [Reports and redaction](#12-reports-and-redaction)
+13. [Privacy taxonomy and scoring](#13-privacy-taxonomy-and-scoring)
+14. [Metadata categories](#14-metadata-categories)
+15. [Exit codes](#15-exit-codes)
+16. [Security and safety design](#16-security-and-safety-design)
+17. [Supported formats](#17-supported-formats)
+18. [Running tests](#18-running-tests)
+19. [Limitations](#19-limitations)
+20. [Project structure](#20-project-structure)
+21. [Documentation](#21-documentation)
+22. [License](#22-license)
 
 ---
 
 ## 1. Overview
 
-Images can contain more than visible pixels. Metadata may include GPS coordinates, capture dates, camera details, author information, comments, and copyright details. Sharing this information unintentionally can expose private or identifying information.
+Images carry more than pixels. Embedded metadata can include GPS coordinates, exact capture times, camera and lens identities, serial numbers, author names, contact details, editing history, embedded thumbnails, and vendor-specific MakerNotes. Publishing such a file can expose a home address, a workplace, a daily routine, or the device that produced the image.
 
 MetaClean helps users:
 
-1. Scan an image for available metadata.
-2. Assess potential privacy risks.
-3. Remove all supported metadata or selected categories.
-4. Verify the output after cleaning.
-5. Export reports for review and auditing.
+1. **Scan** an image and enumerate metadata exhaustively across EXIF, GPS, IPTC, XMP, MakerNotes, ICC profiles, thumbnails, and the container itself.
+2. **Analyze** each finding against a five-level privacy taxonomy with a transparent, explainable score.
+3. **Sanitize** the file using a semantic profile (location, personal, basic, maximum, or custom) while always preserving the original.
+4. **Verify** the output independently and report an explicit outcome.
+5. **Export** JSON, CSV, or HTML reports, redacted by default.
 
-**Important:** Metadata availability depends on the image, its source, and the software used to create or edit it. A scan cannot guarantee that every possible form of hidden information has been detected.
+> **Important:** Metadata availability depends on the image, its source, and the software used to create or edit it. A scan cannot prove that every possible form of hidden information has been detected.
 
-## 2. Features
+## 2. What is new in 2.0
 
-- **Metadata scanning:** Inspect supported embedded metadata.
-- **Privacy risk assessment:** Classify detected metadata using the project's rules.
-- **Metadata cleaning:** Remove supported metadata from a copy of the input image.
-- **Selective cleaning:** Target categories such as GPS, dates, device details, and author information.
-- **Independent verification:** Check whether targeted metadata remains after cleaning.
-- **Batch processing:** Process a directory of images.
-- **Audit reports:** Export supported report formats such as JSON or CSV.
-- **Input validation:** Validate image files and apply configured safety limits.
-- **Automated tests:** Run the test suite with `pytest`.
+- **Exhaustive extraction:** structured XMP/IPTC parsing, raw numeric values, MakerNotes families, embedded thumbnails, and container structure.
+- **Provenance for every tag:** group, family, category, raw value, human-readable value, inferred type, extraction status, and derived flag.
+- **Deep file analysis:** container vs. extension mismatch, MIME type, bit depth, colour model, frames, ICC profiles, trailing data after the end marker, and timestamp inconsistencies. Findings are classified as `CONFIRMED`, `SUSPICIOUS`, or `INFORMATIONAL`.
+- **Five-level privacy taxonomy:** `INFORMATIONAL`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`, with documented weights and caps.
+- **Sanitization profiles:** `basic`, `location`, `personal`, `maximum`, and `custom`.
+- **Explicit verification outcomes:** `VERIFIED CLEAN`, `PARTIALLY CLEANED`, `SENSITIVE DATA REMAINS`, `VERIFICATION FAILED`.
+- **Before/after comparison:** removed, remaining, changed, and newly introduced tags, plus risk-score delta.
+- **Professional CLI:** deep/privacy/full modes, `info`, `--verbose`, `--quiet`, `--no-color`, `--format`, redaction controls, and stable exit codes.
+- **Batch safety:** scan-only mode, SHA-256 duplicate skipping, symlink refusal by default, output-directory exclusion, and per-file isolation.
 
-## 3. Requirements
+## 3. Features
 
-For Linux Mint or Ubuntu, you need:
+- **Read-only scanning** that never modifies the input file.
+- **Independent privacy analysis** with human-readable explanations and recommendations.
+- **Non-destructive cleaning** onto a temporary copy that is atomically moved into place.
+- **Output validation** before success is reported: the cleaned file must remain a readable image with matching dimensions.
+- **Independent verification** that re-opens the output instead of trusting ExifTool's exit code.
+- **Batch processing** with error isolation and collision-free destinations.
+- **Reports:** JSON audit reports, per-tag CSV exports, and self-contained HTML reports.
+- **Redaction by default** in CLI reports; unredacted export is explicit and warns before writing sensitive values.
+- **No network access** and no execution of metadata content.
 
-- Python 3
-- `python3-venv` and `python3-pip`
-- ExifTool (strongly recommended)
-- Git, if you are cloning the repository
+## 4. Requirements
 
-## 4. Installation
+- Python 3.10 or newer
+- `pip` and `venv`
+- ExifTool (strongly recommended; the Pillow fallback cannot inspect IPTC, XMP, or MakerNotes fully)
+- Git, if cloning the repository
 
-### Option A: Quick installation (recommended)
+## 5. Installation
 
-#### Step 1 — Install system packages
-
-Open a terminal with `Ctrl+Alt+T` and run:
+### Option A: Installer (recommended)
 
 ```bash
 sudo apt update
 sudo apt install -y git python3 python3-pip python3-venv libimage-exiftool-perl
-```
 
-#### Step 2 — Download the project
-
-Run these commands only if you do not already have the project:
-
-```bash
 git clone https://github.com/mobadawyx4/MetaClean.git
 cd MetaClean
-```
-
-If the project is already on your computer, go to its directory instead:
-
-```bash
-cd ~/MetaClean
-```
-
-#### Step 3 — Install MetaClean
-
-```bash
 chmod +x install.sh
 ./install.sh
 ```
 
-The installer creates a virtual environment and installs the Python dependencies. If ExifTool is missing, the script attempts to install it using `apt`.
-
-#### Step 4 — Start MetaClean
-
-```bash
-./venv/bin/python main.py
-```
-
 ### Option B: Manual installation
 
-If you prefer to install dependencies yourself:
-
 ```bash
-sudo apt update
 sudo apt install -y python3 python3-pip python3-venv libimage-exiftool-perl
 cd ~/MetaClean
 python3 -m venv venv
@@ -131,235 +116,282 @@ python3 -m venv venv
 ./venv/bin/python -m pip install -r requirements.txt
 ```
 
-Then start the application:
-
-```bash
-./venv/bin/python main.py
-```
-
-### Verify ExifTool
+Verify the backend:
 
 ```bash
 exiftool -ver
+./venv/bin/python main.py info
 ```
-
-To check whether MetaClean detects ExifTool:
-
-```bash
-./venv/bin/python -c "import config; print('ExifTool Available:', config.EXIFTOOL_AVAILABLE, config.EXIFTOOL_PATH)"
-```
-
-
 
 ### Windows (PowerShell)
-
-**Requirements:** Windows 10/11 and Python 3. Install Python from https://www.python.org/downloads/windows/ and enable Add Python to PATH.
-
-**1. Download the project**
-
-Open PowerShell and run:
 
 ```powershell
 git clone https://github.com/mobadawyx4/MetaClean.git
 cd MetaClean
-```
-
-If you downloaded the ZIP, extract it and open PowerShell in the extracted folder.
-
-**2. Install dependencies**
-
-```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 .\install.ps1
+.\run.ps1 info
 ```
 
-**3. Check the application**
-
-```powershell
-.\run.ps1 --help
-```
-
-**4. Scan an image**
-
-```powershell
-.\run.ps1 scan ".\photo.jpg"
-```
-
-Replace `photo.jpg` with your image path.
-
-## 5. Quick Start
-
-MetaClean is a command-line application. Run a subcommand directly; there is no interactive menu.
-
-## 6. Usage Examples
-
-The examples below assume that the input image is named `photo.jpg` and that commands are run from the project folder.
-
-### Scan an image
-
-Windows PowerShell:
-
-```powershell
-.\run.ps1 scan .\photo.jpg
-.\run.ps1 scan .\photo.jpg --detailed
-.\run.ps1 scan .\photo.jpg --json
-```
-
-Linux Mint:
+## 6. Quick Start
 
 ```bash
-./run.sh scan photo.jpg
-./run.sh scan photo.jpg --detailed
-./run.sh scan photo.jpg --json
+# 1. Inspect the image
+./venv/bin/python main.py scan photo.jpg
+
+# 2. Remove all supported metadata into a new file
+./venv/bin/python main.py clean photo.jpg --profile maximum --yes
+
+# 3. Verify the result independently
+./venv/bin/python main.py verify photo_clean.jpg --profile maximum --original photo.jpg
 ```
 
-### Remove metadata
+Running `main.py` with no arguments opens the interactive menu; `main.py photo.jpg` is a shortcut for `scan`.
 
-Save a cleaned copy without overwriting the original.
+## 7. Commands
 
-Windows PowerShell:
+| Command | Purpose |
+| --- | --- |
+| `scan` | Inspect metadata, privacy risk, and container structure. |
+| `clean` | Write a sanitized copy using categories or a profile. |
+| `verify` | Independently verify an image or a cleaned output. |
+| `batch` | Scan or sanitize a directory of images. |
+| `report` | Produce a JSON, CSV, or HTML audit report. |
+| `info` | Show version, backend, modes, profiles, categories, and exit codes. |
 
-```powershell
-.\run.ps1 clean .\photo.jpg --output .\cleaned_photo.jpg --yes
+Global options accepted before or after the subcommand:
+
+```text
+-v, --verbose     additional diagnostic detail
+-q, --quiet       suppress informational output (errors still go to stderr)
+    --no-color    disable ANSI colors
+-V, --version     print the version
 ```
 
-Linux Mint:
+### Scan
 
 ```bash
-./run.sh clean photo.jpg --output cleaned_photo.jpg --yes
+./venv/bin/python main.py scan photo.jpg
+./venv/bin/python main.py scan photo.jpg --deep --detailed
+./venv/bin/python main.py scan photo.jpg --full --report scan.html --format html
+./venv/bin/python main.py scan photo.jpg --fail-on-risk
 ```
 
-### Verify an image
+- `--deep` adds structured XMP/IPTC parsing, raw values, and container analysis.
+- `--privacy` performs a privacy-focused deep scan.
+- `--full` adds embedded-file extraction (`-ee`) and is the slowest mode.
+- `--report PATH --format json|html|csv` writes a report.
+- `--redact` (default) masks sensitive values; `--no-redact` is explicit and warns.
+- `--fail-on-risk` returns exit code `1` when HIGH or CRITICAL risk is detected.
 
-Windows PowerShell:
-
-```powershell
-.\run.ps1 verify .\cleaned_photo.jpg
-.\run.ps1 verify .\cleaned_photo.jpg --json
-```
-
-Linux Mint:
+### Clean
 
 ```bash
-./run.sh verify cleaned_photo.jpg
-./run.sh verify cleaned_photo.jpg --json
+./venv/bin/python main.py clean photo.jpg --profile maximum --yes
+./venv/bin/python main.py clean photo.jpg --profile basic --output private.jpg
+./venv/bin/python main.py clean photo.jpg --profile custom --remove gps,author --yes
+./venv/bin/python main.py clean photo.jpg --remove gps --output no_gps.jpg --yes
 ```
 
-### Generate an audit report
+The original file is never modified. Cleaning writes to a private temporary copy in the destination directory, validates it, and only then replaces the output atomically. Symlinks and same-file outputs are refused.
 
-Windows PowerShell:
-
-```powershell
-.\run.ps1 report .\photo.jpg --output .\audit_report.json --cleaned .\cleaned_photo.jpg
-```
-
-Linux Mint:
+### Verify
 
 ```bash
-./run.sh report photo.jpg --output audit_report.json --cleaned cleaned_photo.jpg
+./venv/bin/python main.py verify photo_clean.jpg --profile maximum
+./venv/bin/python main.py verify photo_clean.jpg --original photo.jpg --report verify.json
 ```
 
-### Process a directory
-
-Create the input directory and put images in it before running these examples.
-
-Windows PowerShell:
-
-```powershell
-.\run.ps1 batch .\raw_photos --output-dir .\sanitized_photos --yes
-.\run.ps1 batch .\raw_photos --output-dir .\sanitized_photos --recursive --report .\audit.csv --yes
-.\run.ps1 batch .\raw_photos --output-dir .\sanitized_photos --format json --report .\audit.json --yes
-```
-
-Linux Mint:
+### Report
 
 ```bash
-./run.sh batch ./raw_photos --output-dir ./sanitized_photos --yes
-./run.sh batch ./raw_photos --output-dir ./sanitized_photos --recursive --report ./audit.csv --yes
-./run.sh batch ./raw_photos --output-dir ./sanitized_photos --format json --report ./audit.json --yes
+./venv/bin/python main.py report photo.jpg --output audit.json
+./venv/bin/python main.py report photo.jpg --output audit.html --format html
+./venv/bin/python main.py report photo.jpg --output audit.csv --format csv --redact
+./venv/bin/python main.py report photo.jpg --output audit.json --cleaned photo_clean.jpg --profile maximum
 ```
 
-For all supported commands and options, run `.\run.ps1 COMMAND --help` on Windows or `./run.sh COMMAND --help` on Linux.
-
-## 7. Selective Metadata Removal
-
-Use `--remove` to choose which metadata categories to remove. Supported categories are `gps`, `date`, `device`, `author`, `copyright`, `comments`, `exif`, `iptc`, `xmp`, and `all`.
-
-Windows PowerShell:
-
-```powershell
-.\run.ps1 clean .\photo.jpg --output .\no_gps.jpg --remove gps --yes
-.\run.ps1 clean .\photo.jpg --output .\no_device_author.jpg --remove device,author --yes
-```
-
-Linux Mint:
+### Info
 
 ```bash
-./run.sh clean photo.jpg --output no_gps.jpg --remove gps --yes
-./run.sh clean photo.jpg --output no_device_author.jpg --remove device,author --yes
+./venv/bin/python main.py info
+./venv/bin/python main.py info --json
 ```
+
+## 8. Scan modes
+
+| Mode | Extraction behaviour |
+| --- | --- |
+| `standard` | Classic extraction: all named tags plus unknown tags. |
+| `deep` | Standard extraction plus structured XMP/IPTC parsing, raw numeric values, and container analysis. |
+| `privacy` | Deep extraction organised around privacy reporting. |
+| `full` | Deep extraction plus embedded-file extraction (`-ee`); most exhaustive and slowest. |
+
+## 9. Sanitization profiles
+
+| Profile | Removes | Typical use |
+| --- | --- | --- |
+| `basic` | GPS/textual location, author/creator, comments, copyright | Everyday sharing |
+| `location` | GPS and textual location (city, state, country, sublocation) | Location privacy while preserving photo settings |
+| `personal` | Author, copyright, comments, unique identifiers | Anonymous publishing with device data retained |
+| `maximum` | All supported metadata (EXIF, GPS, IPTC, XMP, MakerNotes, thumbnails, software) | Highest-assurance release |
+| `custom` | Exactly the categories supplied with `--remove` | Targeted workflows |
+
+Container, colour-space, and orientation structure required for correct rendering is preserved by `maximum`.
+
+Selective categories intentionally overlap in a few places so that one privacy
+theme cannot survive under another tag name:
+
+- `gps` removes native GPS fields and textual place names (IPTC City/State/
+  Country, XMP Location/LocationCreated/LocationShown, Keys/drone/Darwin Core
+  coordinates). It does **not** remove `SubjectLocation`/`SubjectArea`, which
+  are image-relative composition data.
+- `date` uses `-*Date*=` plus `-*Timestamp*=`/`-*Timecode*=` and therefore also
+  removes GPS and vendor date/timestamp fields. Time fields are enumerated
+  rather than using `-*Time*=`, so `ExposureTime` and shutter-release lag
+  settings are retained.
+- `device` uses `-*Software*=` and therefore also removes editing-software
+  identity. `Software`/`ProcessingSoftware` are detected as `software`.
+  `-*Model=` only matches names ending in `Model`, so GeoTIFF `ModelTiePoint`,
+  `ModelTransform`, and `ModelPixelScale` survive.
+- `author` and `copyright` use `-*Creator*=`, `-*Owner*=`, and `-*Rights*=`;
+  these intentionally overlap with software identity (`CreatorTool`,
+  `CreatorAppID`) and rights-owner fields so a privacy theme cannot survive
+  under a different namespace.
+- `comments` uses `-*Comment*=`, `-*Description=`, `-*Caption*=`, and
+  `-*Keyword*=`; this also removes description-like vendor fields (for example
+  `DeviceSettingDescription`, `SeriesDescription`, and hierarchical keywords),
+  which is broader than EXIF `ImageDescription` by design.
+- `gps` coordinate wildcards (`-*Latitude=`, `-*Longitude=`,
+  `-*Coordinates=`) also cover drone, Keys, and Darwin Core geography fields,
+  not just the EXIF GPS IFD.
+- `maximum` removes every writable metadata block, then restores colour-space
+  and orientation tags so rendering is unchanged.
+- `tests/test_category_coverage.py` audits every writable tag in ExifTool's
+  database against the classifier and the category arguments, not just the
+  documented examples.
+
+
+## 10. Verification outcomes
+
+| Outcome | Meaning | Exit code |
+| --- | --- | --- |
+| `VERIFIED CLEAN` | No residual sensitive metadata was detected in the inspected structures for the selected profile. | `0` |
+| `PARTIALLY CLEANED` | Targeted categories are clean, but residual or unselected sensitive metadata remains. | `1` |
+| `SENSITIVE DATA REMAINS` | At least one targeted category still contains detectable metadata. | `2` |
+| `VERIFICATION FAILED` | The available backend cannot inspect the relevant structures, or the file is invalid. | `2` |
+
+Legacy statuses (`PASS`, `WARNING`, `INCOMPLETE`, `FAIL`) remain available in reports for compatibility.
+
+> `VERIFIED CLEAN` covers the inspected metadata structures for the selected profile. It does not attest to pixel content, steganography, or any data outside those structures.
+
+## 11. Batch processing
+
+```bash
+# Scan only: no files are written
+./venv/bin/python main.py batch ./photos --scan-only --format json --report scan.json
+
+# Sanitize with a profile
+./venv/bin/python main.py batch ./raw --output-dir ./clean --profile maximum --recursive --yes
+
+# Skip duplicates and cap the run
+./venv/bin/python main.py batch ./raw --output-dir ./clean --skip-duplicates --max-files 500 --yes
+```
+
+Safety behaviour:
+
+- Symbolic links are skipped unless `--follow-symlinks` is explicitly supplied.
+- The output directory is excluded from recursive discovery, so a batch cannot re-ingest its own output.
+- `--skip-duplicates` hashes file contents with SHA-256 and skips repeats.
+- One corrupted file never aborts the batch.
+- The input directory may not equal the output directory.
+- Batch summaries are redacted by default: rows use positional labels (`image_001`, …) and omit output paths and notes. `--no-redact` is an explicit, confirmed opt-in.
+
+## 12. Reports and redaction
+
+| Format | Contents |
+| --- | --- |
+| JSON | Full audit: provenance tags, privacy assessment, file analysis, removal summary, verification and comparison, warnings, limitations, methodology note. |
+| CSV | One row per tag with group, category, risk level, type, status, and value. |
+| HTML | Self-contained report page with overview stats, sensitive findings, container analysis, cleaning and verification sections. |
+
+- Reports are **redacted by default**, for every format and for both single-image and batch exports. Redaction is an allowlist: only container facts from an explicit structural tag list, tag identity, counts, scores and static explanations are emitted.
+- Metadata values, GPS data, absolute paths, filenames (batch rows are labelled `image_001`, …), filesystem timestamps, free-text previews and before/after comparison values are withheld.
+- A scrub pass removes any leftover identifier literal plus e-mail addresses, phone numbers and home/temporary-directory paths from free-text fields.
+- `--no-redact` exports original values, prints a warning, and asks for confirmation when run on a terminal.
+- CSV values are neutralised against spreadsheet formula injection.
+- HTML output escapes all metadata-derived values; no external assets or network requests are used.
+- JSON export uses an allowlisted encoder for bytes, dates/times, paths, UUIDs, decimals, sets, tuples and enums. Unsupported objects and `NaN`/`Infinity` fail with `JSONEncodingError` rather than being silently stringified.
+- Report writes are staged and atomic: a failed export cannot truncate or destroy an existing report.
+
+## 13. Privacy taxonomy and scoring
+
+Each tag is classified into one of five levels:
+
+| Level | Weight per tag | Category cap | Examples |
+| --- | --- | --- | --- |
+| `CRITICAL` | 35 | 70 | GPS coordinates, direct contact details |
+| `HIGH` | 18 | 45 | Author/creator names, serial numbers, unique IDs, embedded previews |
+| `MEDIUM` | 7 | 21 | Timestamps, camera make/model, copyright text, comments |
+| `LOW` | 2 | 6 | Exposure settings, software fields, generic technical tags |
+| `INFORMATIONAL` | 0 | 0 | Dimensions, colour space, container structure, ICC profile |
+
+The overall score is `min(100, sum(capped per-level contributions))`. The report includes the exact arithmetic and the fixed constants used.
+
+**This score is an explanatory heuristic, not a scientifically validated risk metric.** It exists to make the reasoning transparent and reproducible.
+
+## 14. Metadata categories
 
 | Category | Examples |
 | --- | --- |
-| `gps` | GPS coordinates, altitude, and position |
-| `date` | Capture and creation timestamps |
-| `device` | Camera make, model, lens, and device details |
-| `author` | Creator, artist, owner, and contact information |
-| `copyright` | Copyright and usage information |
-| `comments` | Comments, descriptions, and user notes |
-| `exif` | EXIF metadata |
-| `iptc` | IPTC metadata |
-| `xmp` | XMP metadata |
-| `all` | All supported removable metadata |
+| `gps` | Coordinates, altitude, direction, GPS timestamps, and textual location (city/state/country/sublocation) |
+| `date` | Capture, creation, modification, digitization, release, and expiration timestamps |
+| `device` | Camera make/model, lens, firmware, serial numbers, host/device IDs |
+| `author` | Artist, creator, owner, contact information |
+| `copyright` | Copyright notices, rights, usage terms |
+| `comments` | Comments, descriptions, titles, headlines, captions, keywords |
+| `exif` | Exchangeable Image File Format block |
+| `iptc` | IPTC application record |
+| `xmp` | XMP packets and structured properties |
+| `software` | Software, creator tool, processing history |
+| `identifiers` | Document/instance/unique identifiers |
+| `thumbnail` | Embedded thumbnails and previews |
+| `makernotes` | Vendor-specific MakerNotes |
+| `informational` | Structural and colour-management fields |
 
-Selective cleaning retains categories that were not selected. Review the verification result before sharing the output.
+Detection and removal are kept aligned by `tests/test_category_coverage.py`,
+which verifies every documented tag against the classifier and every removal
+argument against ExifTool. Read-only preview representations
+(`PreviewTIFF`/`PreviewPDF`/`ThumbnailTIFF`) have no writable ExifTool key name;
+they are detected as `thumbnail` and removed only by a full clean (`maximum`).
 
-## 8. Verification Results
+## 15. Exit codes
 
-The project uses these verification statuses:
+| Code | Meaning |
+| --- | --- |
+| `0` | Success / verified clean |
+| `1` | Warning / partially cleaned / risk threshold reached |
+| `2` | Failure / sensitive data remains / invalid input |
+| `3` | Usage error |
 
-- **`PASS`** — The configured checks passed and no targeted metadata was detected.
-- **`WARNING`** — Some unselected sensitive metadata or partial remnants may remain.
-- **`INCOMPLETE`** — Verification could not fully inspect some metadata structures, for example when ExifTool is unavailable.
-- **`FAIL`** — Targeted metadata was detected, the file was invalid, or a check failed.
+## 16. Security and safety design
 
-A `PASS` result applies to the checks performed by MetaClean; it is not a guarantee that an image contains no possible hidden data.
+- **Originals are never modified.** Cleaning operates on a private temporary copy and replaces only the destination.
+- **No shell interpolation.** All external commands use argument lists with `--` before paths.
+- **No trust in names.** A file's extension and MIME type are verified against magic bytes and the decoded container.
+- **No execution of metadata.** Values are treated as data, escaped on output, and never evaluated.
+- **Symlinks are refused, not followed.** Scan/clean/verify inputs, clean destinations, batch input/output directories, and report outputs may not be a symbolic link in their final path component. Dangling links are refused too. Batch `--follow-symlinks` is the only explicit opt-in, and it operates on the resolved target, never through the link.
+- **Alias-safe destinations.** Identical paths, `..`/relative aliases, hardlinks, and same device/inode outputs are refused, so a "new" output name cannot silently overwrite the input or another alias.
+- **Validate before replace.** The destination is untouched until the staged file is a readable image, non-empty, and dimension-compatible. ExifTool failure, truncated output, dimension mismatch, a symlink swap, or a changed destination leaves existing content intact.
+- **Identity-checked replacement.** Input, destination, output directory, and temporary file identities are re-checked immediately before the atomic `os.replace`; POSIX builds use `O_NOFOLLOW` for every read and copy.
+- **Cleanup is scoped.** Temporary cleanup removes only the private file this run created, never a file that was moved into the temp name.
+- **Verification is independent.** Success is never inferred from a zero exit code.
+- **Batch isolation.** Symlinks are opt-in, outputs are excluded, duplicates are optional, and failures are per-file.
+- **Redaction-first reporting.** Every export is allowlist-redacted unless `redact=False`/`--no-redact` is supplied explicitly; unknown fields are withheld rather than printed.
 
-## 9. Batch Processing
+See [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) for the full threat model.
 
-Batch processing requires an input directory and `--output-dir`. Use `--recursive` to include subdirectories, and `--report` to save a CSV or JSON summary.
-
-Windows PowerShell:
-
-```powershell
-.\run.ps1 batch .\raw_photos --output-dir .\sanitized_photos --yes
-.\run.ps1 batch .\raw_photos --output-dir .\sanitized_photos --recursive --report .\audit.csv --yes
-.\run.ps1 batch .\raw_photos --output-dir .\sanitized_photos --format json --report .\audit.json --yes
-```
-
-Linux Mint:
-
-```bash
-./run.sh batch ./raw_photos --output-dir ./sanitized_photos --yes
-./run.sh batch ./raw_photos --output-dir ./sanitized_photos --recursive --report ./audit.csv --yes
-./run.sh batch ./raw_photos --output-dir ./sanitized_photos --format json --report ./audit.json --yes
-```
-
-Run the batch command's help output to see all available options.
-
-## 10. Security and Privacy Notes
-
-- Keep an untouched backup of important files.
-- Review the output path before running cleaning commands.
-- MetaClean is designed to save cleaned output separately from the source image.
-- ExifTool is recommended for broader metadata handling and verification.
-- Metadata removal does not blur faces, remove visible text, or detect every possible steganographic payload.
-- File-system timestamps are separate from metadata embedded inside an image.
-- Always review the cleaned image and verification report before sharing it.
-
-## 11. Supported Formats
-
-The project is designed to work with common image formats including:
+## 17. Supported formats
 
 - JPEG (`.jpg`, `.jpeg`)
 - PNG (`.png`)
@@ -367,55 +399,73 @@ The project is designed to work with common image formats including:
 - TIFF (`.tif`, `.tiff`)
 - BMP (`.bmp`)
 
-Actual extraction, removal, and verification capabilities can vary by format and by whether ExifTool is available.
+Extraction, removal, and verification capabilities vary by format and by whether ExifTool is available.
 
-## 12. Running Tests
-
-Install the dependencies first, then run:
+## 18. Running tests
 
 ```bash
 ./venv/bin/python -m pytest tests -v
 ```
 
-Run a specific test module:
+Run a single module:
 
 ```bash
-./venv/bin/python -m pytest tests/test_validator.py -v
 ./venv/bin/python -m pytest tests/test_scanner.py -v
-./venv/bin/python -m pytest tests/test_remover.py -v
-./venv/bin/python -m pytest tests/test_verifier.py -v
-./venv/bin/python -m pytest tests/test_batch.py -v
+./venv/bin/python -m pytest tests/test_profiles.py -v
+./venv/bin/python -m pytest tests/test_file_analyzer.py -v
+./venv/bin/python -m pytest tests/test_cli.py -v
 ```
 
-## 13. Limitations
+All tests use synthetic images generated during the test run; no sample photo or personal data is required.
 
-- MetaClean focuses on supported image metadata structures such as EXIF, IPTC, and XMP.
-- It does not guarantee detection of steganography or hidden information encoded in pixel values.
-- Some proprietary or complex metadata may require ExifTool for fuller inspection.
-- Removing metadata does not remove sensitive content visibly present in the image itself.
+## 19. Limitations
 
-## 14. Project Structure
+- MetaClean focuses on supported image metadata structures (EXIF, GPS, IPTC, XMP, MakerNotes, ICC, container data).
+- It does not detect steganography or arbitrary information encoded in pixel values.
+- The Pillow fallback cannot fully inspect IPTC, XMP, or MakerNotes; verification reports `VERIFICATION FAILED` rather than claiming a clean result.
+- Removing metadata does not remove sensitive content that is visibly present in the image.
+- Redaction withholds metadata values, paths and filenames, but it cannot remove personal information that is written into pixel content, and an unredacted report intentionally contains every original value.
+- Privacy scores are heuristics, not validated risk measurements.
+- ExifTool support for exotic vendor MakerNotes varies by camera model.
+- Symlink protection is strongest on POSIX systems with `O_NOFOLLOW`. On platforms without it, the final-component check is lstat-based and a narrow time-of-check/time-of-use window remains; see [Methodology §5.4](docs/METHODOLOGY.md#54-path-and-symlink-policy-f-06).
+- Intermediate directory symlinks (for example a symlinked `/tmp` or home directory) are resolved once so the tool works on ordinary systems. Destructive replacement is still guarded by final-component and identity checks.
+
+## 20. Project structure
 
 ```text
 MetaClean/
-├── main.py
-├── config.py
+├── main.py                     CLI entry point and interactive menu
+├── config.py                   Constants, categories, scan modes, structural allowlist
 ├── requirements.txt
-├── install.sh
-├── install.ps1
-├── run.sh
-├── run.ps1
+├── install.sh / install.ps1
+├── run.sh / run.ps1
 ├── modules/
-│   ├── image_validator.py
-│   ├── metadata_scanner.py
-│   ├── privacy_analyzer.py
-│   ├── metadata_remover.py
-│   ├── metadata_verifier.py
-│   ├── report_generator.py
-│   └── batch_processor.py
-└── tests/
+│   ├── exiftool_backend.py     Safe ExifTool invocation and parsing
+│   ├── image_validator.py      Magic-byte and decode validation
+│   ├── metadata_scanner.py     Exhaustive extraction and categorization
+│   ├── privacy_analyzer.py     Five-level taxonomy and scoring
+│   ├── file_analyzer.py        Container and consistency analysis
+│   ├── sanitizer_profiles.py   Named sanitization profiles
+│   ├── metadata_remover.py     Non-destructive cleaning engine
+│   ├── comparison.py           Before/after metadata diff
+│   ├── metadata_verifier.py    Independent verification and outcomes
+│   ├── report_generator.py     JSON, CSV, HTML reports
+│   └── batch_processor.py      Batch orchestration and safety
+├── tests/
+└── docs/
+    ├── ARCHITECTURE.md
+    ├── THREAT_MODEL.md
+    ├── METHODOLOGY.md
+    └── DEVELOPMENT_PLAN.md
 ```
 
-## 15. License
+## 21. Documentation
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — components, data flow, and design decisions.
+- [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) — assets, adversaries, and mitigations.
+- [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md) — extraction, taxonomy, scoring, and verification methodology.
+- [`docs/DEVELOPMENT_PLAN.md`](docs/DEVELOPMENT_PLAN.md) — phased delivery record and future work.
+
+## 22. License
 
 MetaClean is released under the MIT License. See the [`LICENSE`](LICENSE) file for the license text.

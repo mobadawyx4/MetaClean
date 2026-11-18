@@ -171,3 +171,20 @@ def test_temporary_files_cleaned_up(jpeg_with_exif: Path, temp_dir: Path) -> Non
     files = list(out_dir.iterdir())
     assert len(files) == 1
     assert files[0].name == "cleaned.jpg"
+
+
+def test_noop_removal_warns_when_no_tags_updated(clean_jpeg: Path, temp_dir: Path) -> None:
+    """Selective removal on an already-clean file must warn that no tags were updated."""
+    remover = MetadataRemover()
+    if not remover.exiftool_available:
+        pytest.skip("ExifTool required for selective clean warning test")
+
+    out_path = temp_dir / "noop_clean.jpg"
+    res = remover.clean(
+        input_path=clean_jpeg,
+        output_path=out_path,
+        categories=["gps"],
+        overwrite_output=True,
+    )
+    assert res.success is True
+    assert any("no tags were updated" in w.lower() for w in res.warnings)
